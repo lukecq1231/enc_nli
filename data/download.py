@@ -47,5 +47,5 @@ if __name__ == '__main__':
     multinli_dir = os.path.join(base_dir, 'multinli')
     wordvec_dir = os.path.join(base_dir, 'glove')
     download_multinli(multinli_dir)
-    # download_wordvecs(wordvec_dir)
+    download_wordvecs(wordvec_dir)
 
