@@ -14,7 +14,7 @@ bash fetch_and_preprocess.sh
 
 2. Train and test model
 ```
-cd scripts
+cd scripts/enc_nli
 bash train.sh
 ```
 
