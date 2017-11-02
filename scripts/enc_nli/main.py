@@ -205,53 +205,6 @@ def concatenate(tensor_list, axis=0):
 
     return out
 
-
-# batch preparation
-def prepare_data(seqs_x, seqs_y, labels, maxlen=None):
-    lengths_x = [len(s) for s in seqs_x]
-    lengths_y = [len(s) for s in seqs_y]
-
-    if maxlen is not None:
-        new_seqs_x = []
-        new_seqs_y = []
-        new_lengths_x = []
-        new_lengths_y = []
-        new_labels = []
-        for l_x, s_x, l_y, s_y, l in zip(lengths_x, seqs_x, lengths_y, seqs_y, labels):
-            if l_x < maxlen and l_y < maxlen:
-                new_seqs_x.append(s_x)
-                new_lengths_x.append(l_x)
-                new_seqs_y.append(s_y)
-                new_lengths_y.append(l_y)
-                new_labels.append(l)
-        lengths_x = new_lengths_x
-        seqs_x = new_seqs_x
-        lengths_y = new_lengths_y
-        seqs_y = new_seqs_y
-        labels = new_labels
-
-        if len(lengths_x) < 1 or len(lengths_y) < 1:
-            return None, None, None, None, None
-
-    n_samples = len(seqs_x)
-    maxlen_x = numpy.max(lengths_x)
-    maxlen_y = numpy.max(lengths_y)
-
-    x = numpy.zeros((maxlen_x, n_samples)).astype('int64')
-    y = numpy.zeros((maxlen_y, n_samples)).astype('int64')
-    x_mask = numpy.zeros((maxlen_x, n_samples)).astype('float32')
-    y_mask = numpy.zeros((maxlen_y, n_samples)).astype('float32')
-    l = numpy.zeros((n_samples,)).astype('int64')
-    for idx, [s_x, s_y, ll] in enumerate(zip(seqs_x, seqs_y, labels)):
-        x[:lengths_x[idx], idx] = s_x
-        x_mask[:lengths_x[idx], idx] = 1.
-        y[:lengths_y[idx], idx] = s_y
-        y_mask[:lengths_y[idx], idx] = 1.
-        l[idx] = ll
-
-    return x, x_mask, y, y_mask, l
-
-
 def prepare_data(seqs_x, seqs_y, labels, worddicts_r, maxlen=None):
     # x: a list of sentences
     lengths_x = [len(s) for s in seqs_x]
@@ -323,10 +276,10 @@ def prepare_data(seqs_x, seqs_y, labels, worddicts_r, maxlen=None):
     x_mask = numpy.zeros((maxlen_x, n_samples)).astype('float32')
     y_mask = numpy.zeros((maxlen_y, n_samples)).astype('float32')
     l = numpy.zeros((n_samples,)).astype('int64')
-    char_x1 = numpy.zeros((maxlen_x, n_samples, max_char_len_x)).astype('int64')
-    char_x1_mask = numpy.zeros((maxlen_x, n_samples, max_char_len_x)).astype('float32')
-    char_x2 = numpy.zeros((maxlen_y, n_samples, max_char_len_y)).astype('int64')
-    char_x2_mask = numpy.zeros((maxlen_y, n_samples, max_char_len_y)).astype('float32')
+    char_x = numpy.zeros((maxlen_x, n_samples, max_char_len_x)).astype('int64')
+    char_x_mask = numpy.zeros((maxlen_x, n_samples, max_char_len_x)).astype('float32')
+    char_y = numpy.zeros((maxlen_y, n_samples, max_char_len_y)).astype('int64')
+    char_y_mask = numpy.zeros((maxlen_y, n_samples, max_char_len_y)).astype('float32')
 
     for idx, [s_x, s_y, ll] in enumerate(zip(seqs_x, seqs_y, labels)):
         x[:lengths_x[idx], idx] = s_x
@@ -336,13 +289,13 @@ def prepare_data(seqs_x, seqs_y, labels, worddicts_r, maxlen=None):
         l[idx] = ll
 
         for j in range(0, lengths_x[idx]):
-            char_x1[j, idx, :l_seqs_x_char[idx][j]] = seqs_x_char[idx][j]
-            char_x1_mask[j, idx, :l_seqs_x_char[idx][j]] = 1.
+            char_x[j, idx, :l_seqs_x_char[idx][j]] = seqs_x_char[idx][j]
+            char_x_mask[j, idx, :l_seqs_x_char[idx][j]] = 1.
         for j in range(0, lengths_y[idx]):
-            char_x2[j, idx, :l_seqs_y_char[idx][j]] = seqs_y_char[idx][j]
-            char_x2_mask[j, idx, :l_seqs_y_char[idx][j]] = 1.
+            char_y[j, idx, :l_seqs_y_char[idx][j]] = seqs_y_char[idx][j]
+            char_y_mask[j, idx, :l_seqs_y_char[idx][j]] = 1.
 
-    return x, x_mask, char_x1, char_x1_mask, y, y_mask, char_x2, char_x2_mask, l
+    return x, x_mask, char_x, char_x_mask, y, y_mask, char_y, char_y_mask, l
 
 
 # feedforward layer: affine transformation + point-wise nonlinearity
@@ -455,16 +408,11 @@ def init_params(options, worddicts):
                 if word in worddicts and worddicts[word] < options['n_words']:
                     params['Wemb'][worddicts[word], :] = vector
 
-    w_shp5 = (options['char_nout'], 1, options['char_k_rows'], options['char_k_cols'])
-    w_bound5 = numpy.sqrt(3 * options['char_k_rows'] * options['char_k_cols'])
-    w_shp3 = (options['char_nout'], 1, options['char_k_rows']-2, options['char_k_cols'])
-    w_bound3 = numpy.sqrt(3 * (options['char_k_rows']-2) * options['char_k_cols'])
-    w_shp1 = (options['char_nout'], 1, options['char_k_rows']-4, options['char_k_cols'])
-    w_bound1 = numpy.sqrt(3 * (options['char_k_rows']-4) * options['char_k_cols'])
     params['Charemb'] = norm_weight(options['l_alphabet']+1, options['dim_char_emb'])
-    params['filter5'] = numpy.random.uniform(low=-1.0 / w_bound5, high=1.0 / w_bound5, size=w_shp5).astype('float32')
-    params['filter3'] = numpy.random.uniform(low=-1.0 / w_bound3, high=1.0 / w_bound3, size=w_shp3).astype('float32')
-    params['filter1'] = numpy.random.uniform(low=-1.0 / w_bound1, high=1.0 / w_bound1, size=w_shp1).astype('float32')
+    for char_k_rows in options['char_k_rows']:
+        w_shp = (options['char_nout'], 1, char_k_rows, options['char_k_cols'])
+        w_bound = numpy.sqrt(3 * char_k_rows * options['char_k_cols'])
+        params['filter_{}'.format(char_k_rows)] = numpy.random.uniform(low=-1.0 / w_bound, high=1.0 / w_bound, size=w_shp).astype('float32')
 
     dim_emb = options['dim_word']+3*options['char_nout']
 
@@ -534,59 +482,40 @@ def build_model(tparams, options):
     n_timesteps_x2 = x2.shape[0]
     n_samples = x1.shape[1]
 
-    char_x1 = theano.tensor.tensor3('char_x1', dtype = 'int64')
-    char_x1_mask = theano.tensor.tensor3('char_x1_mask', dtype = 'float32')
-    char_x2 = theano.tensor.tensor3('char_x2', dtype = 'int64')
-    char_x2_mask = theano.tensor.tensor3('char_x2_mask', dtype = 'float32')
+    char_x1 = theano.tensor.tensor3('char_x1', dtype='int64')
+    char_x1_mask = theano.tensor.tensor3('char_x1_mask', dtype='float32')
+    char_x2 = theano.tensor.tensor3('char_x2', dtype='int64')
+    char_x2_mask = theano.tensor.tensor3('char_x2_mask', dtype='float32')
 
     emb_char1 = tparams['Charemb'][char_x1.flatten()].reshape([n_timesteps_x1, n_samples, char_x1.shape[2], options['dim_char_emb']])
     emb_char1 = emb_char1 * char_x1_mask[:,:,:,None]
     emb_char_inp1 = emb_char1.reshape([n_timesteps_x1*n_samples, 1, char_x1.shape[2], options['dim_char_emb']])
 
-    emb_char1_5 = tensor.nnet.conv.conv2d(emb_char_inp1, tparams['filter5'], border_mode='valid')
-    emb_char1_3 = tensor.nnet.conv.conv2d(emb_char_inp1, tparams['filter3'], border_mode='valid')
-    emb_char1_1 = tensor.nnet.conv.conv2d(emb_char_inp1, tparams['filter1'], border_mode='valid')
+    emb_char1s = []
+    for num in options['char_k_rows']:
+        emb_char1 = tensor.nnet.conv.conv2d(emb_char_inp1, tparams['filter_{}'.format(num)], border_mode='valid')
+        emb_char1 = tensor.nnet.nnet.relu(emb_char1)
+        emb_char1 = emb_char1.reshape([n_timesteps_x1*n_samples, options['char_nout'], emb_char1.shape[2]])
+        emb_char1 = emb_char1.max(2)
+        emb_char1 = emb_char1.reshape([n_timesteps_x1, n_samples, options['char_nout']])
+        emb_char1s.append(emb_char1)
 
-    emb_char1_5 = tensor.nnet.nnet.relu(emb_char1_5)
-    emb_char1_5 = emb_char1_5.reshape([n_timesteps_x1*n_samples, options['char_nout'], emb_char1_5.shape[2]])
-    emb_char1_5 = emb_char1_5.max(2)
-    emb_char1_5 = emb_char1_5.reshape([n_timesteps_x1, n_samples, options['char_nout']])
-
-    emb_char1_3 = tensor.nnet.nnet.relu(emb_char1_3)
-    emb_char1_3 = emb_char1_3.reshape([n_timesteps_x1*n_samples, options['char_nout'], emb_char1_3.shape[2]])
-    emb_char1_3 = emb_char1_3.max(2)
-    emb_char1_3 = emb_char1_3.reshape([n_timesteps_x1, n_samples, options['char_nout']])
-
-    emb_char1_1 = tensor.nnet.nnet.relu(emb_char1_1)
-    emb_char1_1 = emb_char1_1.reshape([n_timesteps_x1*n_samples, options['char_nout'], emb_char1_1.shape[2]])
-    emb_char1_1 = emb_char1_1.max(2)
-    emb_char1_1 = emb_char1_1.reshape([n_timesteps_x1, n_samples, options['char_nout']])
-
-    emb_char1 = concatenate([emb_char1_5, emb_char1_3, emb_char1_1], axis = 2)
+    emb_char1 = concatenate(emb_char1s, axis = 2)
 
     emb_char2 = tparams['Charemb'][char_x2.flatten()].reshape([n_timesteps_x2, n_samples, char_x2.shape[2], options['dim_char_emb']])
     emb_char2 = emb_char2 * char_x2_mask[:,:,:,None]
     emb_char_inp2 = emb_char2.reshape([n_timesteps_x2*n_samples, 1, char_x2.shape[2], options['dim_char_emb']])
-    emb_char2_5 = tensor.nnet.conv.conv2d(emb_char_inp2, tparams['filter5'], border_mode='valid')
-    emb_char2_3 = tensor.nnet.conv.conv2d(emb_char_inp2, tparams['filter3'], border_mode='valid')
-    emb_char2_1 = tensor.nnet.conv.conv2d(emb_char_inp2, tparams['filter1'], border_mode='valid')
 
-    emb_char2_5 = tensor.nnet.nnet.relu(emb_char2_5)
-    emb_char2_5 = emb_char2_5.reshape([n_timesteps_x2*n_samples, options['char_nout'], emb_char2_5.shape[2]])
-    emb_char2_5 = emb_char2_5.max(2)
-    emb_char2_5 = emb_char2_5.reshape([n_timesteps_x2, n_samples, options['char_nout']])
+    emb_char2s = []
+    for num in options['char_k_rows']:
+        emb_char2 = tensor.nnet.conv.conv2d(emb_char_inp2, tparams['filter_{}'.format(num)], border_mode='valid')
+        emb_char2 = tensor.nnet.nnet.relu(emb_char2)
+        emb_char2 = emb_char2.reshape([n_timesteps_x2*n_samples, options['char_nout'], emb_char2.shape[2]])
+        emb_char2 = emb_char2.max(2)
+        emb_char2 = emb_char2.reshape([n_timesteps_x2, n_samples, options['char_nout']])
+        emb_char2s.append(emb_char2)
 
-    emb_char2_3 = tensor.nnet.nnet.relu(emb_char2_3)
-    emb_char2_3 = emb_char2_3.reshape([n_timesteps_x2*n_samples, options['char_nout'], emb_char2_3.shape[2]])
-    emb_char2_3 = emb_char2_3.max(2)
-    emb_char2_3 = emb_char2_3.reshape([n_timesteps_x2, n_samples, options['char_nout']])
-
-    emb_char2_1 = tensor.nnet.nnet.relu(emb_char2_1)
-    emb_char2_1 = emb_char2_1.reshape([n_timesteps_x2*n_samples, options['char_nout'], emb_char2_1.shape[2]])
-    emb_char2_1 = emb_char2_1.max(2)
-    emb_char2_1 = emb_char2_1.reshape([n_timesteps_x2, n_samples, options['char_nout']])
-
-    emb_char2 = concatenate([emb_char2_5, emb_char2_3, emb_char2_1], axis = 2)
+    emb_char2 = concatenate(emb_char2s, axis = 2)
 
     # word embedding
     emb1 = tparams['Wemb'][x1.flatten()].reshape([n_timesteps_x1, n_samples, options['dim_word']])
@@ -667,27 +596,27 @@ def build_model(tparams, options):
 
 
 # calculate the log probablities on a given corpus using translation model
-def pred_probs(f_log_probs, prepare_data, options, iterator, verbose=False):
+def pred_probs(f_log_probs, prepare_data, options, iterator, worddicts_r, verbose=False):
     probs = []
     n_done = 0
 
     for x1, x2, y in iterator:
         n_done += len(x1)
-        x1, x1_mask, x2, x2_mask, y = prepare_data(x1, x2, y)
+        x1, x1_mask, char_x1, char_x1_mask, x2, x2_mask, char_x2, char_x2_mask, y = prepare_data(x1, x2, y, worddicts_r)
 
-        pprobs = f_log_probs(x1, x1_mask, x2, x2_mask, y)
+        pprobs = f_log_probs(x1, x1_mask, char_x1, char_x1_mask, x2, x2_mask, char_x2, char_x2_mask, y)
         for pp in pprobs:
             probs.append(pp)
 
         if numpy.isnan(numpy.mean(probs)):
-            pdb.set_trace()
+            ipdb.set_trace()
 
         if verbose:
             print >>sys.stderr, '%d samples computed' % (n_done)
 
     return numpy.array(probs)
 
-def pred_acc(f_pred, prepare_data, options, iterator, verbose=False):
+def pred_acc(f_pred, prepare_data, options, iterator, worddicts_r, verbose=False):
     """
     Just compute the accuracy
     f_pred: Theano fct computing the prediction
@@ -698,8 +627,8 @@ def pred_acc(f_pred, prepare_data, options, iterator, verbose=False):
 
     for x1, x2, y in iterator:
         n_done += len(x1)
-        x1, x1_mask, x2, x2_mask, y = prepare_data(x1, x2, y)
-        preds = f_pred(x1, x1_mask, x2, x2_mask)
+        x1, x1_mask, char_x1, char_x1_mask, x2, x2_mask, char_x2, char_x2_mask, y = prepare_data(x1, x2, y, worddicts_r)
+        preds = f_pred(x1, x1_mask, char_x1, char_x1_mask, x2, x2_mask, char_x2, char_x2_mask)
         valid_acc += (preds == y).sum()
 
     valid_acc = 1.0 * valid_acc / n_done
@@ -864,7 +793,7 @@ def train(
     model_options['l_alphabet'] = len(model_options['alphabet'])
     model_options['dim_char_emb'] = 15
     model_options['char_nout'] = 100
-    model_options['char_k_rows'] = 5
+    model_options['char_k_rows'] = [1, 3, 5]
     model_options['char_k_cols'] = model_options['dim_char_emb']
 
     # load dictionary and invert them
