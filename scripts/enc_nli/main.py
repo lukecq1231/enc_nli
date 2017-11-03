@@ -1,5 +1,5 @@
 '''
-Build a Enhancing LSTM model for Natural Language Inference
+Build a Gated-Attenion BiLSTM model for Natural Language Inference
 '''
 import theano
 import theano.tensor as tensor
